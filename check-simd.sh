@@ -10,6 +10,7 @@ FILES=(
   "web-wasm-webp/webp_enc.wasm"
   "web-wasm-webp/webp_dec.wasm"
   "node_modules/icodec/dist/pngquant_bg.wasm"
+  "node_modules/icodec/dist/webp-dec.wasm"
 )
 
 for f in "${FILES[@]}"; do

@@ -5,6 +5,7 @@ import { init as initSquoosh, decode as squooshDecode, encode as squooshEncode, 
 import { init as initWebp, decode as webpDecode, encode as webpEncode } from './web-wasm-webp/webp.js';
 
 let icodecPng = null;
+let icodecWebp = null;
 let modulesReady = [];
 let referenceBuffer = null;
 let referenceWidth = 0;
@@ -75,8 +76,15 @@ async function initModules() {
     const { png } = await import('./node_modules/icodec/lib/index.js');
     await png.loadEncoder();
     icodecPng = png;
-    modulesReady.push('icodec');
-  } catch (e) { console.error('icodec init failed:', e); }
+    modulesReady.push('icodec PNG');
+  } catch (e) { console.error('icodec PNG init failed:', e); }
+
+  try {
+    const { webp } = await import('./node_modules/icodec/lib/index.js');
+    await webp.loadDecoder();
+    icodecWebp = webp;
+    modulesReady.push('icodec WebP');
+  } catch (e) { console.error('icodec WebP init failed:', e); }
 
   return modulesReady;
 }
@@ -223,10 +231,17 @@ async function runBenchmarks(imageData, pngBytes, iterations, isPng, doCheckCorr
   }, iterations);
   self.postMessage({ type: 'result', category: 'decode', data: { ...browserWebpDecodeResult, correct: null } });
 
-  // WASM WebP decode
-  self.postMessage({ type: 'progress', message: 'Decoding: WebP WASM...' });
+  // WASM WebP decode (libwebp)
+  self.postMessage({ type: 'progress', message: 'Decoding: WebP WASM (libwebp)...' });
   const webpDecodeResult = benchmark(() => webpDecode(webpBytes), iterations);
-  self.postMessage({ type: 'result', category: 'decode', data: { name: 'WebP WASM', ...webpDecodeResult, correct: null, result: undefined } });
+  self.postMessage({ type: 'result', category: 'decode', data: { name: 'WebP (libwebp)', ...webpDecodeResult, correct: null, result: undefined } });
+
+  // icodec WebP decode
+  if (icodecWebp) {
+    self.postMessage({ type: 'progress', message: 'Decoding: icodec WebP...' });
+    const icodecWebpDecodeResult = benchmark(() => icodecWebp.decode(webpBytes), iterations);
+    self.postMessage({ type: 'result', category: 'decode', data: { name: 'WebP (icodec)', ...icodecWebpDecodeResult, correct: null, result: undefined } });
+  }
 
   // === ENCODE BENCHMARKS ===
 
