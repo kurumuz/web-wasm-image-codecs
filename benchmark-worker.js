@@ -136,8 +136,19 @@ function benchmarkEncode(name, encodeFn, iterations, verifyDecodeFn) {
 
 // Run all benchmarks - streams results one by one
 function runBenchmarks(imageData, pngBytes, iterations, isPng) {
-  const { width, height } = imageData;
-  const pixels = imageData.data;
+  let { width, height } = imageData;
+  let pixels = imageData.data;
+
+  // If PNG and useWasmDecode flag set, decode with WASM for accurate pixels
+  if (isPng && imageData.useWasmDecode) {
+    self.postMessage({ type: 'progress', message: 'Decoding PNG with WASM...' });
+    // Use icodec (fastest) or squoosh as decoder
+    const decoded = icodecPng ? icodecPng.decode(pngBytes) : squooshDecode(pngBytes);
+    pixels = decoded.data;
+    width = decoded.width;
+    height = decoded.height;
+  }
+
   const imgDataObj = { data: pixels, width, height };
   const imgDataWithDepth = { data: new Uint8ClampedArray(pixels), width, height, depth: 8 };
 

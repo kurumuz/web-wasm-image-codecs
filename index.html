@@ -207,17 +207,29 @@
     async function loadImage(file) {
       originalFileSize = file.size;
 
-      const img = await createImageBitmap(file);
-      const canvas = new OffscreenCanvas(img.width, img.height);
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(img, 0, 0);
-      currentImageData = ctx.getImageData(0, 0, img.width, img.height);
-
-      // Also get PNG bytes for decode benchmarks
+      // Get raw file bytes
       const arrayBuffer = await file.arrayBuffer();
       currentPngBytes = new Uint8Array(arrayBuffer);
 
-      imageInfo.textContent = `Loaded: ${img.width} x ${img.height} (${formatBytes(file.size)})`;
+      // Check if PNG - if so, we'll let the worker decode it for accurate pixels
+      const isPng = currentPngBytes[0] === 0x89 && currentPngBytes[1] === 0x50;
+
+      if (isPng) {
+        // For PNG: send bytes to worker, it will decode with WASM for accurate comparison
+        // Use browser decode just for preview dimensions
+        const img = await createImageBitmap(file);
+        imageInfo.textContent = `Loaded: ${img.width} x ${img.height} (${formatBytes(file.size)}) [PNG - WASM decode]`;
+        currentImageData = { width: img.width, height: img.height, data: null, useWasmDecode: true };
+      } else {
+        // For non-PNG: use browser canvas decode
+        const img = await createImageBitmap(file);
+        const canvas = new OffscreenCanvas(img.width, img.height);
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        currentImageData = ctx.getImageData(0, 0, img.width, img.height);
+        imageInfo.textContent = `Loaded: ${img.width} x ${img.height} (${formatBytes(file.size)})`;
+      }
+
       runBtn.disabled = !modulesReady;
     }
 
@@ -291,7 +303,8 @@
           imageData: {
             data: currentImageData.data,
             width: currentImageData.width,
-            height: currentImageData.height
+            height: currentImageData.height,
+            useWasmDecode: currentImageData.useWasmDecode || false
           },
           pngBytes: currentPngBytes,
           iterations,
