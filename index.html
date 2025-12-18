@@ -112,7 +112,10 @@
         <option value="10">10</option>
       </select>
     </div>
-    <button class="btn" id="runBtn" disabled>Run Benchmark</button>
+    <div style="display: flex; gap: 10px; margin-top: 15px;">
+      <button class="btn" id="runBuiltinBtn" disabled style="flex: 1; background: #28a745;">Run with Built-in Image (+ Correctness Test)</button>
+      <button class="btn" id="runBtn" disabled style="flex: 1;">Run with Uploaded Image</button>
+    </div>
     <div class="progress" id="progress"></div>
   </div>
 
@@ -140,6 +143,7 @@
     const initStatus = document.getElementById('initStatus');
     const imageInfo = document.getElementById('imageInfo');
     const runBtn = document.getElementById('runBtn');
+    const runBuiltinBtn = document.getElementById('runBuiltinBtn');
     const progress = document.getElementById('progress');
     const resultsContainer = document.getElementById('resultsContainer');
     const decodeTable = document.getElementById('decodeTable').querySelector('tbody');
@@ -150,6 +154,7 @@
     let currentImageData = null;
     let currentPngBytes = null;
     let originalFileSize = 0;
+    let useBuiltinImage = false;
 
     // Create worker for WASM operations
     const worker = new Worker('./benchmark-worker.js', { type: 'module' });
@@ -163,6 +168,7 @@
           initStatus.textContent = 'Ready: ' + modules.join(', ');
           initStatus.style.color = '#28a745';
           modulesReady = true;
+          runBuiltinBtn.disabled = false; // Always enable builtin button when ready
           if (currentImageData) runBtn.disabled = false;
         } else {
           initStatus.textContent = 'Failed to load any modules';
@@ -180,7 +186,8 @@
         highlightBest(encodeTable, 1);
         progress.textContent = 'Done!';
         progress.style.background = '#d4edda';
-        runBtn.disabled = false;
+        runBuiltinBtn.disabled = false;
+        if (currentImageData) runBtn.disabled = false;
       }
     };
 
@@ -281,11 +288,47 @@
       if (bestRow) bestRow.cells[colIndex].classList.add('best');
     }
 
-    // Run benchmark button
+    // Run benchmark with uploaded image (no correctness test)
     runBtn.addEventListener('click', () => {
       if (!currentImageData) return;
+      runBenchmark(false);
+    });
 
+    // Run benchmark with built-in image (with correctness test)
+    runBuiltinBtn.addEventListener('click', async () => {
+      // Load built-in image
+      progress.style.display = 'block';
+      progress.style.background = '#fff3cd';
+      progress.textContent = 'Loading built-in image...';
+
+      try {
+        const response = await fetch('./image.png');
+        const arrayBuffer = await response.arrayBuffer();
+        currentPngBytes = new Uint8Array(arrayBuffer);
+        originalFileSize = currentPngBytes.length;
+
+        // Get dimensions from reference
+        const dimsResponse = await fetch('./image.raw.json');
+        const dims = await dimsResponse.json();
+
+        currentImageData = {
+          width: dims.width,
+          height: dims.height,
+          data: null,
+          useWasmDecode: true
+        };
+
+        imageInfo.textContent = `Built-in: ${dims.width} x ${dims.height} (${formatBytes(originalFileSize)})`;
+        runBenchmark(true);
+      } catch (e) {
+        progress.textContent = 'Error loading built-in image: ' + e.message;
+        progress.style.background = '#f8d7da';
+      }
+    });
+
+    function runBenchmark(checkCorrectness) {
       runBtn.disabled = true;
+      runBuiltinBtn.disabled = true;
       progress.style.display = 'block';
       progress.style.background = '#fff3cd';
       progress.textContent = 'Starting benchmark...';
@@ -308,10 +351,11 @@
           },
           pngBytes: currentPngBytes,
           iterations,
-          isPng
+          isPng,
+          checkCorrectness
         }
       });
-    });
+    }
   </script>
 </body>
 </html>

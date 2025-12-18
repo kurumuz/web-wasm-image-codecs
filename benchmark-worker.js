@@ -135,7 +135,7 @@ function benchmarkEncode(name, encodeFn, iterations, verifyDecodeFn) {
 }
 
 // Run all benchmarks - streams results one by one
-function runBenchmarks(imageData, pngBytes, iterations, isPng) {
+function runBenchmarks(imageData, pngBytes, iterations, isPng, checkCorrectness = false) {
   let { width, height } = imageData;
   let pixels = imageData.data;
 
@@ -153,21 +153,30 @@ function runBenchmarks(imageData, pngBytes, iterations, isPng) {
   const imgDataWithDepth = { data: new Uint8ClampedArray(pixels), width, height, depth: 8 };
 
   // Use icodec or Squoosh as the reference decoder for verifying encodes (fastest correct decoder)
-  const verifyPngDecode = icodecPng
-    ? (data) => icodecPng.decode(data)
-    : (data) => squooshDecode(data);
+  const verifyPngDecode = checkCorrectness
+    ? (icodecPng ? (data) => icodecPng.decode(data) : (data) => squooshDecode(data))
+    : null;
 
   // === DECODE BENCHMARKS ===
   if (isPng) {
     self.postMessage({ type: 'progress', message: 'Decoding: PNG (denosaurs)...' });
-    self.postMessage({ type: 'result', category: 'decode', data: benchmarkDecode('PNG (denosaurs)', () => decodePng(pngBytes), iterations) });
+    self.postMessage({ type: 'result', category: 'decode', data: checkCorrectness
+      ? benchmarkDecode('PNG (denosaurs)', () => decodePng(pngBytes), iterations)
+      : { name: 'PNG (denosaurs)', ...benchmark(() => decodePng(pngBytes), iterations), correct: null, result: undefined }
+    });
 
     self.postMessage({ type: 'progress', message: 'Decoding: PNG (Squoosh)...' });
-    self.postMessage({ type: 'result', category: 'decode', data: benchmarkDecode('PNG (Squoosh)', () => squooshDecode(pngBytes), iterations) });
+    self.postMessage({ type: 'result', category: 'decode', data: checkCorrectness
+      ? benchmarkDecode('PNG (Squoosh)', () => squooshDecode(pngBytes), iterations)
+      : { name: 'PNG (Squoosh)', ...benchmark(() => squooshDecode(pngBytes), iterations), correct: null, result: undefined }
+    });
 
     if (icodecPng) {
       self.postMessage({ type: 'progress', message: 'Decoding: icodec...' });
-      self.postMessage({ type: 'result', category: 'decode', data: benchmarkDecode('icodec PNG', () => icodecPng.decode(pngBytes), iterations) });
+      self.postMessage({ type: 'result', category: 'decode', data: checkCorrectness
+        ? benchmarkDecode('icodec PNG', () => icodecPng.decode(pngBytes), iterations)
+        : { name: 'icodec PNG', ...benchmark(() => icodecPng.decode(pngBytes), iterations), correct: null, result: undefined }
+      });
     }
   }
 
@@ -210,9 +219,9 @@ function runBenchmarks(imageData, pngBytes, iterations, isPng) {
   const webpQ80Result = benchmark(() => webpEncode(imgDataObj, { quality: 80 }), iterations);
   self.postMessage({ type: 'result', category: 'encode', data: { name: 'WebP (q80)', ...webpQ80Result, correct: null, result: undefined } });
 
-  // WebP lossless - verify with webp decoder
+  // WebP lossless - verify with webp decoder if checkCorrectness
   self.postMessage({ type: 'progress', message: 'Encoding: WebP lossless...' });
-  self.postMessage({ type: 'result', category: 'encode', data: benchmarkEncode('WebP (lossless)', () => webpEncode(imgDataObj, { lossless: 1 }), iterations, webpDecode) });
+  self.postMessage({ type: 'result', category: 'encode', data: benchmarkEncode('WebP (lossless)', () => webpEncode(imgDataObj, { lossless: 1 }), iterations, checkCorrectness ? webpDecode : null) });
 
   // Signal completion
   self.postMessage({ type: 'done' });
@@ -226,7 +235,7 @@ self.onmessage = async (e) => {
     const ready = await initModules();
     self.postMessage({ type: 'ready', modules: ready });
   } else if (type === 'benchmark') {
-    const { imageData, pngBytes, iterations, isPng } = data;
-    runBenchmarks(imageData, pngBytes, iterations, isPng);
+    const { imageData, pngBytes, iterations, isPng, checkCorrectness } = data;
+    runBenchmarks(imageData, pngBytes, iterations, isPng, checkCorrectness);
   }
 };
