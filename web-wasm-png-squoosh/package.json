@@ -1,0 +1,9 @@
+{
+  "name": "web-wasm-png-squoosh",
+  "version": "1.0.0",
+  "description": "Browser PNG encoder/decoder using Squoosh WASM codec",
+  "type": "module",
+  "scripts": {
+    "start": "npx serve -p 8092"
+  }
+}

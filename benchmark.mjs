@@ -31,9 +31,16 @@ WebAssembly.instantiateStreaming = async (source, imports) => {
   return WebAssembly.instantiate(buffer, imports);
 };
 
-// Load PNG module
+// Load PNG module (denosaurs)
 const pngModule = await import('./web-wasm-png/pngs.js');
 await pngModule.init('./web-wasm-png/pngs.wasm');
+
+// Load PNG module (Squoosh + OxiPNG)
+const pngSquooshModule = await import('./web-wasm-png-squoosh/pngs.js');
+await pngSquooshModule.init(
+  './web-wasm-png-squoosh/squoosh_png_bg.wasm',
+  './web-wasm-png-squoosh/squoosh_oxipng_bg.wasm'
+);
 
 // Load WebP module
 const webpModule = await import('./web-wasm-webp/webp.js');
@@ -103,11 +110,37 @@ const pngDecodeResult = benchmark('PNG Decode', () => {
 }, iterations);
 results.push(pngDecodeResult);
 
-// PNG Encode
+// PNG Encode (denosaurs)
 const pngEncodeResult = benchmark('PNG Encode', () => {
   return pngModule.encodePng(pixels, width, height, { color: pngModule.ColorType.RGBA });
 }, iterations);
 results.push(pngEncodeResult);
+
+// PNG Squoosh Decode benchmark
+const pngSquooshEncoded = pngSquooshModule.encode(imgData);
+
+const pngSquooshDecodeResult = benchmark('PNG Decode (Squoosh)', () => {
+  return pngSquooshModule.decode(pngSquooshEncoded);
+}, iterations);
+results.push(pngSquooshDecodeResult);
+
+// PNG Squoosh Encode
+const pngSquooshEncodeResult = benchmark('PNG Encode (Squoosh)', () => {
+  return pngSquooshModule.encode(imgData);
+}, iterations);
+results.push(pngSquooshEncodeResult);
+
+// OxiPNG Encode (level 1)
+const oxipngEncodeL1Result = benchmark('PNG OxiPNG (level 1)', () => {
+  return pngSquooshModule.encodeOptimized(imgData, null, null, 1);
+}, iterations);
+results.push(oxipngEncodeL1Result);
+
+// OxiPNG Encode (level 2)
+const oxipngEncodeL2Result = benchmark('PNG OxiPNG (level 2)', () => {
+  return pngSquooshModule.encodeOptimized(imgData, null, null, 2);
+}, iterations);
+results.push(oxipngEncodeL2Result);
 
 // WebP Decode benchmark (encode first, then benchmark decode)
 const webpEncoded = webpModule.encode(imgData, { quality: 80 });
@@ -138,13 +171,18 @@ for (const r of results) {
 }
 
 // Print sizes
+const oxipngL1 = pngSquooshModule.encodeOptimized(imgData, null, null, 1);
+const oxipngL2 = pngSquooshModule.encodeOptimized(imgData, null, null, 2);
+const webpLossless = webpModule.encode(imgData, { lossless: 1 });
+
 console.log(`\n${'Format'.padEnd(25)} ${'Size'.padStart(15)}`);
 console.log('-'.repeat(42));
 console.log(`${'Original file'.padEnd(25)} ${(imageData.length / 1024).toFixed(1).padStart(12)} KB`);
-console.log(`${'PNG'.padEnd(25)} ${(pngEncoded.length / 1024).toFixed(1).padStart(12)} KB`);
+console.log(`${'PNG (denosaurs)'.padEnd(25)} ${(pngEncoded.length / 1024).toFixed(1).padStart(12)} KB`);
+console.log(`${'PNG (Squoosh)'.padEnd(25)} ${(pngSquooshEncoded.length / 1024).toFixed(1).padStart(12)} KB`);
+console.log(`${'PNG OxiPNG (level 1)'.padEnd(25)} ${(oxipngL1.length / 1024).toFixed(1).padStart(12)} KB`);
+console.log(`${'PNG OxiPNG (level 2)'.padEnd(25)} ${(oxipngL2.length / 1024).toFixed(1).padStart(12)} KB`);
 console.log(`${'WebP (q80)'.padEnd(25)} ${(webpEncoded.length / 1024).toFixed(1).padStart(12)} KB`);
-
-const webpLossless = webpModule.encode(imgData, { lossless: 1 });
 console.log(`${'WebP (lossless)'.padEnd(25)} ${(webpLossless.length / 1024).toFixed(1).padStart(12)} KB`);
 
 console.log('');

@@ -2,11 +2,15 @@ MIT License
 
 This project contains modified code and WASM binaries from:
 
-PNG WASM binary and original JavaScript:
+PNG WASM binary and original JavaScript (web-wasm-png):
 Copyright (c) 2021 Denosaurs
 https://github.com/denosaurs/pngs
 
-WebP WASM binaries and original JavaScript:
+PNG WASM binary and JavaScript (web-wasm-png-squoosh):
+Copyright 2018 Google LLC
+https://github.com/GoogleChromeLabs/squoosh
+
+WebP WASM binaries and original JavaScript (web-wasm-webp):
 Copyright (c) 2023 - 2024 Joseph Huckaby and PixlCore
 https://github.com/jhuckaby/webp-wasm
 
