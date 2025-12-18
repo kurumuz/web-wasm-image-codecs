@@ -1,0 +1,12 @@
+{
+  "name": "wasm-image-codecs",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "npx serve -p 8080",
+    "benchmark": "node benchmark.mjs"
+  },
+  "dependencies": {
+    "icodec": "^0.6.0"
+  }
+}
