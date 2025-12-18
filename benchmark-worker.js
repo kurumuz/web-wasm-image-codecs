@@ -134,8 +134,32 @@ function benchmarkEncode(name, encodeFn, iterations, verifyDecodeFn) {
   return { name, ...timing, correct: null, result: undefined };
 }
 
+// Async benchmark for browser native APIs
+async function benchmarkAsync(name, asyncFn, iterations, warmupCount = 3) {
+  // Warmup
+  let result;
+  try {
+    for (let i = 0; i < warmupCount; i++) result = await asyncFn();
+  } catch (e) { return { name, error: e.message }; }
+
+  const times = [];
+  for (let i = 0; i < iterations; i++) {
+    const start = performance.now();
+    result = await asyncFn();
+    times.push(performance.now() - start);
+  }
+
+  return {
+    name,
+    avg: times.reduce((a, b) => a + b, 0) / times.length,
+    min: Math.min(...times),
+    max: Math.max(...times),
+    size: result?.size || result?.length || result?.byteLength
+  };
+}
+
 // Run all benchmarks - streams results one by one
-function runBenchmarks(imageData, pngBytes, iterations, isPng, checkCorrectness = false) {
+async function runBenchmarks(imageData, pngBytes, iterations, isPng, doCheckCorrectness = false) {
   let { width, height } = imageData;
   let pixels = imageData.data;
 
@@ -153,41 +177,70 @@ function runBenchmarks(imageData, pngBytes, iterations, isPng, checkCorrectness 
   const imgDataWithDepth = { data: new Uint8ClampedArray(pixels), width, height, depth: 8 };
 
   // Use icodec or Squoosh as the reference decoder for verifying encodes (fastest correct decoder)
-  const verifyPngDecode = checkCorrectness
+  const verifyPngDecode = doCheckCorrectness
     ? (icodecPng ? (data) => icodecPng.decode(data) : (data) => squooshDecode(data))
     : null;
 
   // === DECODE BENCHMARKS ===
   if (isPng) {
+    // Browser native PNG decode
+    self.postMessage({ type: 'progress', message: 'Decoding: Browser native...' });
+    const browserDecodeResult = await benchmarkAsync('Browser PNG', async () => {
+      const blob = new Blob([pngBytes], { type: 'image/png' });
+      return await createImageBitmap(blob);
+    }, iterations);
+    self.postMessage({ type: 'result', category: 'decode', data: { ...browserDecodeResult, correct: null } });
+
     self.postMessage({ type: 'progress', message: 'Decoding: PNG (denosaurs)...' });
-    self.postMessage({ type: 'result', category: 'decode', data: checkCorrectness
+    self.postMessage({ type: 'result', category: 'decode', data: doCheckCorrectness
       ? benchmarkDecode('PNG (denosaurs)', () => decodePng(pngBytes), iterations)
       : { name: 'PNG (denosaurs)', ...benchmark(() => decodePng(pngBytes), iterations), correct: null, result: undefined }
     });
 
     self.postMessage({ type: 'progress', message: 'Decoding: PNG (Squoosh)...' });
-    self.postMessage({ type: 'result', category: 'decode', data: checkCorrectness
+    self.postMessage({ type: 'result', category: 'decode', data: doCheckCorrectness
       ? benchmarkDecode('PNG (Squoosh)', () => squooshDecode(pngBytes), iterations)
       : { name: 'PNG (Squoosh)', ...benchmark(() => squooshDecode(pngBytes), iterations), correct: null, result: undefined }
     });
 
     if (icodecPng) {
       self.postMessage({ type: 'progress', message: 'Decoding: icodec...' });
-      self.postMessage({ type: 'result', category: 'decode', data: checkCorrectness
+      self.postMessage({ type: 'result', category: 'decode', data: doCheckCorrectness
         ? benchmarkDecode('icodec PNG', () => icodecPng.decode(pngBytes), iterations)
         : { name: 'icodec PNG', ...benchmark(() => icodecPng.decode(pngBytes), iterations), correct: null, result: undefined }
       });
     }
   }
 
-  // WebP decode - no reference comparison for WebP (lossy)
+  // Browser native WebP decode
   self.postMessage({ type: 'progress', message: 'Encoding WebP for decode test...' });
   const webpBytes = webpEncode(imgDataObj, { quality: 80 });
-  self.postMessage({ type: 'progress', message: 'Decoding: WebP...' });
+
+  self.postMessage({ type: 'progress', message: 'Decoding: Browser WebP...' });
+  const browserWebpDecodeResult = await benchmarkAsync('Browser WebP', async () => {
+    const blob = new Blob([webpBytes], { type: 'image/webp' });
+    return await createImageBitmap(blob);
+  }, iterations);
+  self.postMessage({ type: 'result', category: 'decode', data: { ...browserWebpDecodeResult, correct: null } });
+
+  // WASM WebP decode
+  self.postMessage({ type: 'progress', message: 'Decoding: WebP WASM...' });
   const webpDecodeResult = benchmark(() => webpDecode(webpBytes), iterations);
-  self.postMessage({ type: 'result', category: 'decode', data: { name: 'WebP', ...webpDecodeResult, correct: null, result: undefined } });
+  self.postMessage({ type: 'result', category: 'decode', data: { name: 'WebP WASM', ...webpDecodeResult, correct: null, result: undefined } });
 
   // === ENCODE BENCHMARKS ===
+
+  // Browser native PNG encode using OffscreenCanvas
+  self.postMessage({ type: 'progress', message: 'Encoding: Browser PNG...' });
+  const browserPngEncodeResult = await benchmarkAsync('Browser PNG', async () => {
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+    const imgData = new ImageData(new Uint8ClampedArray(pixels), width, height);
+    ctx.putImageData(imgData, 0, 0);
+    return await canvas.convertToBlob({ type: 'image/png' });
+  }, iterations);
+  self.postMessage({ type: 'result', category: 'encode', data: { ...browserPngEncodeResult, correct: null } });
+
   self.postMessage({ type: 'progress', message: 'Encoding: PNG (denosaurs)...' });
   self.postMessage({ type: 'result', category: 'encode', data: benchmarkEncode('PNG (denosaurs)', () => encodePng(pixels, width, height, { color: ColorType.RGBA }), iterations, verifyPngDecode) });
 
@@ -213,6 +266,17 @@ function runBenchmarks(imageData, pngBytes, iterations, isPng, checkCorrectness 
     self.postMessage({ type: 'progress', message: 'Encoding: icodec L2...' });
     self.postMessage({ type: 'result', category: 'encode', data: benchmarkEncode('icodec PNG L2', () => icodecPng.encode(imgDataWithDepth, { quantize: false, level: 2 }), iterations, verifyPngDecode) });
   }
+
+  // Browser native WebP encode
+  self.postMessage({ type: 'progress', message: 'Encoding: Browser WebP...' });
+  const browserWebpEncodeResult = await benchmarkAsync('Browser WebP', async () => {
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+    const imgData = new ImageData(new Uint8ClampedArray(pixels), width, height);
+    ctx.putImageData(imgData, 0, 0);
+    return await canvas.convertToBlob({ type: 'image/webp', quality: 0.8 });
+  }, iterations);
+  self.postMessage({ type: 'result', category: 'encode', data: { ...browserWebpEncodeResult, correct: null } });
 
   // WebP lossy - no correctness check (lossy compression)
   self.postMessage({ type: 'progress', message: 'Encoding: WebP q80...' });
