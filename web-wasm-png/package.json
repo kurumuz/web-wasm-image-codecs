@@ -1,0 +1,9 @@
+{
+  "name": "web-wasm-png",
+  "version": "1.0.0",
+  "description": "Browser PNG encoder/decoder using WASM",
+  "type": "module",
+  "scripts": {
+    "start": "npx serve -p 8090"
+  }
+}

@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PNG Encode/Decode Test</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+      background: #f5f5f5;
+    }
+    h1 {
+      text-align: center;
+      color: #333;
+    }
+    .container {
+      background: white;
+      border-radius: 8px;
+      padding: 20px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+      margin-bottom: 20px;
+    }
+    .upload-area {
+      border: 2px dashed #ccc;
+      border-radius: 8px;
+      padding: 40px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.3s, background-color 0.3s;
+    }
+    .upload-area:hover {
+      border-color: #666;
+      background-color: #fafafa;
+    }
+    .upload-area.dragover {
+      border-color: #2196F3;
+      background-color: #e3f2fd;
+    }
+    input[type="file"] {
+      display: none;
+    }
+    .images-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+      margin-top: 20px;
+    }
+    .image-box {
+      text-align: center;
+    }
+    .image-box h3 {
+      margin-bottom: 10px;
+      color: #666;
+    }
+    .image-box canvas, .image-box img {
+      max-width: 100%;
+      height: auto;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+    }
+    .info {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #666;
+    }
+    .status {
+      padding: 15px;
+      border-radius: 4px;
+      margin-top: 20px;
+      display: none;
+    }
+    .status.loading {
+      display: block;
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      color: #856404;
+    }
+    .status.success {
+      display: block;
+      background: #d4edda;
+      border: 1px solid #28a745;
+      color: #155724;
+    }
+    .status.error {
+      display: block;
+      background: #f8d7da;
+      border: 1px solid #dc3545;
+      color: #721c24;
+    }
+    .comparison {
+      margin-top: 20px;
+      padding: 20px;
+      background: #f8f9fa;
+      border-radius: 8px;
+    }
+    .comparison h3 {
+      margin-top: 0;
+    }
+    .comparison-result {
+      font-size: 18px;
+      font-weight: bold;
+    }
+    .comparison-result.match {
+      color: #28a745;
+    }
+    .comparison-result.mismatch {
+      color: #dc3545;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      margin-top: 15px;
+    }
+    .stat {
+      background: white;
+      padding: 10px;
+      border-radius: 4px;
+      text-align: center;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: #666;
+    }
+    .stat-value {
+      font-size: 18px;
+      font-weight: bold;
+      color: #333;
+    }
+    #initStatus {
+      text-align: center;
+      padding: 10px;
+      margin-bottom: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>PNG Encode/Decode Test</h1>
+
+  <div id="initStatus">Initializing WASM module...</div>
+
+  <div class="container">
+    <div class="upload-area" id="uploadArea">
+      <p>Drop a PNG image here or click to upload</p>
+      <input type="file" id="fileInput" accept="image/png">
+    </div>
+
+    <div class="status" id="status"></div>
+
+    <div class="images-container" id="imagesContainer" style="display: none;">
+      <div class="image-box">
+        <h3>Original Image</h3>
+        <canvas id="originalCanvas"></canvas>
+        <div class="info" id="originalInfo"></div>
+      </div>
+
+      <div class="image-box">
+        <h3>Re-encoded Image</h3>
+        <canvas id="reEncodedCanvas"></canvas>
+        <div class="info" id="reEncodedInfo"></div>
+      </div>
+    </div>
+
+    <div class="comparison" id="comparison" style="display: none;">
+      <h3>Comparison Results</h3>
+      <div class="comparison-result" id="comparisonResult"></div>
+      <div class="stats" id="stats"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { init, decodePng, encodePng, ColorType, BitDepth } from './pngs.js';
+
+    const uploadArea = document.getElementById('uploadArea');
+    const fileInput = document.getElementById('fileInput');
+    const status = document.getElementById('status');
+    const imagesContainer = document.getElementById('imagesContainer');
+    const originalCanvas = document.getElementById('originalCanvas');
+    const reEncodedCanvas = document.getElementById('reEncodedCanvas');
+    const originalInfo = document.getElementById('originalInfo');
+    const reEncodedInfo = document.getElementById('reEncodedInfo');
+    const comparison = document.getElementById('comparison');
+    const comparisonResult = document.getElementById('comparisonResult');
+    const stats = document.getElementById('stats');
+    const initStatus = document.getElementById('initStatus');
+
+    let wasmReady = false;
+
+    // Initialize WASM module
+    async function initWasm() {
+      try {
+        await init();
+        wasmReady = true;
+        initStatus.textContent = 'WASM module ready!';
+        initStatus.style.color = '#28a745';
+        uploadArea.style.pointerEvents = 'auto';
+      } catch (err) {
+        initStatus.textContent = 'Failed to initialize WASM: ' + err.message;
+        initStatus.style.color = '#dc3545';
+        console.error('WASM init error:', err);
+      }
+    }
+
+    initWasm();
+
+    // Set up event listeners
+    uploadArea.addEventListener('click', () => fileInput.click());
+    uploadArea.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadArea.classList.add('dragover');
+    });
+    uploadArea.addEventListener('dragleave', () => {
+      uploadArea.classList.remove('dragover');
+    });
+    uploadArea.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadArea.classList.remove('dragover');
+      const file = e.dataTransfer.files[0];
+      if (file && file.type === 'image/png') {
+        processFile(file);
+      } else {
+        showStatus('Please drop a PNG file', 'error');
+      }
+    });
+    fileInput.addEventListener('change', (e) => {
+      if (e.target.files[0]) {
+        processFile(e.target.files[0]);
+      }
+    });
+
+    function showStatus(message, type) {
+      status.textContent = message;
+      status.className = 'status ' + type;
+    }
+
+    function formatBytes(bytes) {
+      if (bytes < 1024) return bytes + ' B';
+      if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(2) + ' KB';
+      return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+    }
+
+    async function processFile(file) {
+      if (!wasmReady) {
+        showStatus('WASM module not ready yet', 'error');
+        return;
+      }
+
+      showStatus('Processing...', 'loading');
+
+      try {
+        // Read the original PNG file
+        const originalPngData = new Uint8Array(await file.arrayBuffer());
+        const originalSize = originalPngData.length;
+
+        // Decode the PNG
+        const decodeStart = performance.now();
+        const decoded = decodePng(originalPngData);
+        const decodeTime = performance.now() - decodeStart;
+
+        console.log('Decoded:', decoded);
+
+        // Display original image
+        originalCanvas.width = decoded.width;
+        originalCanvas.height = decoded.height;
+        const originalCtx = originalCanvas.getContext('2d');
+
+        // Create ImageData from decoded pixels
+        const originalImageData = createImageData(decoded);
+        originalCtx.putImageData(originalImageData, 0, 0);
+
+        originalInfo.innerHTML = `
+          Size: ${decoded.width} x ${decoded.height}<br>
+          Color Type: ${getColorTypeName(decoded.colorType)}<br>
+          Bit Depth: ${decoded.bitDepth}<br>
+          File Size: ${formatBytes(originalSize)}<br>
+          Decode Time: ${decodeTime.toFixed(2)}ms
+        `;
+
+        // Re-encode the PNG
+        const encodeStart = performance.now();
+
+        // Determine encode options based on original color type
+        let encodeOptions = {
+          color: decoded.colorType,
+          depth: decoded.bitDepth
+        };
+
+        // For simplicity, always encode as RGBA if we have alpha, RGB otherwise
+        let imageToEncode = decoded.image;
+        if (decoded.colorType === ColorType.RGBA) {
+          encodeOptions.color = ColorType.RGBA;
+        } else if (decoded.colorType === ColorType.RGB) {
+          encodeOptions.color = ColorType.RGB;
+        } else if (decoded.colorType === ColorType.Grayscale || decoded.colorType === ColorType.GrayscaleAlpha) {
+          // Convert grayscale to RGB/RGBA for simplicity
+          imageToEncode = convertToRGBA(decoded);
+          encodeOptions.color = ColorType.RGBA;
+        } else {
+          // Default to RGBA
+          imageToEncode = convertToRGBA(decoded);
+          encodeOptions.color = ColorType.RGBA;
+        }
+
+        const reEncodedPngData = encodePng(
+          imageToEncode,
+          decoded.width,
+          decoded.height,
+          encodeOptions
+        );
+        const encodeTime = performance.now() - encodeStart;
+        const reEncodedSize = reEncodedPngData.length;
+
+        // Decode the re-encoded PNG to verify
+        const reDecoded = decodePng(reEncodedPngData);
+
+        // Display re-encoded image
+        reEncodedCanvas.width = reDecoded.width;
+        reEncodedCanvas.height = reDecoded.height;
+        const reEncodedCtx = reEncodedCanvas.getContext('2d');
+        const reEncodedImageData = createImageData(reDecoded);
+        reEncodedCtx.putImageData(reEncodedImageData, 0, 0);
+
+        reEncodedInfo.innerHTML = `
+          Size: ${reDecoded.width} x ${reDecoded.height}<br>
+          Color Type: ${getColorTypeName(reDecoded.colorType)}<br>
+          Bit Depth: ${reDecoded.bitDepth}<br>
+          File Size: ${formatBytes(reEncodedSize)}<br>
+          Encode Time: ${encodeTime.toFixed(2)}ms
+        `;
+
+        // Compare pixel data
+        const compareResult = compareImages(decoded, reDecoded);
+
+        imagesContainer.style.display = 'grid';
+        comparison.style.display = 'block';
+
+        if (compareResult.identical) {
+          comparisonResult.textContent = 'Images are IDENTICAL!';
+          comparisonResult.className = 'comparison-result match';
+        } else {
+          comparisonResult.textContent = 'Images have differences';
+          comparisonResult.className = 'comparison-result mismatch';
+        }
+
+        stats.innerHTML = `
+          <div class="stat">
+            <div class="stat-label">Original Size</div>
+            <div class="stat-value">${formatBytes(originalSize)}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Re-encoded Size</div>
+            <div class="stat-value">${formatBytes(reEncodedSize)}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Size Difference</div>
+            <div class="stat-value">${formatBytes(Math.abs(reEncodedSize - originalSize))} ${reEncodedSize > originalSize ? '(larger)' : '(smaller)'}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Pixel Differences</div>
+            <div class="stat-value">${compareResult.differentPixels}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Max Difference</div>
+            <div class="stat-value">${compareResult.maxDifference}</div>
+          </div>
+          <div class="stat">
+            <div class="stat-label">Total Time</div>
+            <div class="stat-value">${(decodeTime + encodeTime).toFixed(2)}ms</div>
+          </div>
+        `;
+
+        showStatus('Processing complete!', 'success');
+
+      } catch (err) {
+        showStatus('Error: ' + err.message, 'error');
+        console.error('Processing error:', err);
+      }
+    }
+
+    function createImageData(decoded) {
+      const { width, height, image, colorType } = decoded;
+      const imageData = new ImageData(width, height);
+      const data = imageData.data;
+
+      if (colorType === ColorType.RGBA) {
+        // Direct copy for RGBA
+        for (let i = 0; i < image.length; i++) {
+          data[i] = image[i];
+        }
+      } else if (colorType === ColorType.RGB) {
+        // RGB to RGBA
+        let j = 0;
+        for (let i = 0; i < image.length; i += 3) {
+          data[j++] = image[i];
+          data[j++] = image[i + 1];
+          data[j++] = image[i + 2];
+          data[j++] = 255;
+        }
+      } else if (colorType === ColorType.Grayscale) {
+        // Grayscale to RGBA
+        let j = 0;
+        for (let i = 0; i < image.length; i++) {
+          data[j++] = image[i];
+          data[j++] = image[i];
+          data[j++] = image[i];
+          data[j++] = 255;
+        }
+      } else if (colorType === ColorType.GrayscaleAlpha) {
+        // Grayscale + Alpha to RGBA
+        let j = 0;
+        for (let i = 0; i < image.length; i += 2) {
+          data[j++] = image[i];
+          data[j++] = image[i];
+          data[j++] = image[i];
+          data[j++] = image[i + 1];
+        }
+      } else {
+        // Try to handle as RGBA
+        for (let i = 0; i < Math.min(image.length, data.length); i++) {
+          data[i] = image[i];
+        }
+      }
+
+      return imageData;
+    }
+
+    function convertToRGBA(decoded) {
+      const { width, height, image, colorType } = decoded;
+      const rgba = new Uint8Array(width * height * 4);
+
+      if (colorType === ColorType.RGBA) {
+        return image;
+      } else if (colorType === ColorType.RGB) {
+        let j = 0;
+        for (let i = 0; i < image.length; i += 3) {
+          rgba[j++] = image[i];
+          rgba[j++] = image[i + 1];
+          rgba[j++] = image[i + 2];
+          rgba[j++] = 255;
+        }
+      } else if (colorType === ColorType.Grayscale) {
+        let j = 0;
+        for (let i = 0; i < image.length; i++) {
+          rgba[j++] = image[i];
+          rgba[j++] = image[i];
+          rgba[j++] = image[i];
+          rgba[j++] = 255;
+        }
+      } else if (colorType === ColorType.GrayscaleAlpha) {
+        let j = 0;
+        for (let i = 0; i < image.length; i += 2) {
+          rgba[j++] = image[i];
+          rgba[j++] = image[i];
+          rgba[j++] = image[i];
+          rgba[j++] = image[i + 1];
+        }
+      }
+
+      return rgba;
+    }
+
+    function getColorTypeName(colorType) {
+      const names = {
+        [ColorType.Grayscale]: 'Grayscale',
+        [ColorType.RGB]: 'RGB',
+        [ColorType.Indexed]: 'Indexed',
+        [ColorType.GrayscaleAlpha]: 'Grayscale + Alpha',
+        [ColorType.RGBA]: 'RGBA'
+      };
+      return names[colorType] || 'Unknown (' + colorType + ')';
+    }
+
+    function compareImages(img1, img2) {
+      // Compare dimensions
+      if (img1.width !== img2.width || img1.height !== img2.height) {
+        return {
+          identical: false,
+          differentPixels: img1.width * img1.height,
+          maxDifference: 255
+        };
+      }
+
+      // Convert both to RGBA for comparison
+      const rgba1 = convertToRGBA(img1);
+      const rgba2 = convertToRGBA(img2);
+
+      let differentPixels = 0;
+      let maxDifference = 0;
+
+      for (let i = 0; i < rgba1.length; i += 4) {
+        const diff = Math.max(
+          Math.abs(rgba1[i] - rgba2[i]),
+          Math.abs(rgba1[i + 1] - rgba2[i + 1]),
+          Math.abs(rgba1[i + 2] - rgba2[i + 2]),
+          Math.abs(rgba1[i + 3] - rgba2[i + 3])
+        );
+
+        if (diff > 0) {
+          differentPixels++;
+          maxDifference = Math.max(maxDifference, diff);
+        }
+      }
+
+      return {
+        identical: differentPixels === 0,
+        differentPixels,
+        maxDifference
+      };
+    }
+  </script>
+</body>
+</html>

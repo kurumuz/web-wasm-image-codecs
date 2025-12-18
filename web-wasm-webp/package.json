@@ -1,0 +1,9 @@
+{
+  "name": "web-wasm-webp",
+  "version": "1.0.0",
+  "description": "Browser WebP encoder/decoder using libwebp compiled to WebAssembly",
+  "type": "module",
+  "scripts": {
+    "start": "npx serve -p 8091"
+  }
+}
