@@ -120,7 +120,7 @@
     <h3>Decode Performance</h3>
     <table id="decodeTable">
       <thead>
-        <tr><th>Codec</th><th>Avg (ms)</th><th>Min</th><th>Max</th></tr>
+        <tr><th>Codec</th><th>Avg (ms)</th><th>Min</th><th>Max</th><th>Correct</th></tr>
       </thead>
       <tbody></tbody>
     </table>
@@ -128,7 +128,7 @@
     <h3 style="margin-top: 30px;">Encode Performance</h3>
     <table id="encodeTable">
       <thead>
-        <tr><th>Codec</th><th>Avg (ms)</th><th>Min</th><th>Max</th><th>Size (KB)</th></tr>
+        <tr><th>Codec</th><th>Avg (ms)</th><th>Min</th><th>Max</th><th>Size (KB)</th><th>Correct</th></tr>
       </thead>
       <tbody></tbody>
     </table>
@@ -230,11 +230,20 @@
     function addRow(table, name, data, isEncode = false) {
       const tr = document.createElement('tr');
       if (data.error) {
-        tr.innerHTML = `<td>${name}</td><td colspan="${isEncode ? 4 : 3}" class="error">${data.error}</td>`;
+        tr.innerHTML = `<td>${name}</td><td colspan="${isEncode ? 5 : 4}" class="error">${data.error}</td>`;
       } else {
         let html = `<td>${name}</td><td>${data.avg.toFixed(2)}</td><td>${data.min.toFixed(2)}</td><td>${data.max.toFixed(2)}</td>`;
-        if (isEncode && data.size !== undefined) {
-          html += `<td>${(data.size / 1024).toFixed(1)}</td>`;
+        if (isEncode) {
+          html += `<td>${data.size !== undefined ? (data.size / 1024).toFixed(1) : '-'}</td>`;
+        }
+        // Correctness column
+        if (data.correct === true) {
+          html += `<td class="done">✓</td>`;
+        } else if (data.correct === false) {
+          const reason = data.diffPixels !== undefined ? `${data.diffPixels} diff` : (data.reason || 'failed');
+          html += `<td class="error">✗ ${reason}</td>`;
+        } else {
+          html += `<td>-</td>`;
         }
         tr.innerHTML = html;
       }
