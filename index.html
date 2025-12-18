@@ -135,11 +135,6 @@
   </div>
 
   <script type="module">
-    // Import all codecs
-    import { init as initPng, decodePng, encodePng, ColorType } from './web-wasm-png/pngs.js';
-    import { init as initSquoosh, decode as squooshDecode, encode as squooshEncode, encodeOptimized } from './web-wasm-png-squoosh/pngs.js';
-    import { init as initWebp, decode as webpDecode, encode as webpEncode } from './web-wasm-webp/webp.js';
-
     const uploadArea = document.getElementById('uploadArea');
     const fileInput = document.getElementById('fileInput');
     const initStatus = document.getElementById('initStatus');
@@ -152,48 +147,51 @@
     const iterationsSelect = document.getElementById('iterations');
 
     let modulesReady = false;
-    let icodecPng = null;
     let currentImageData = null;
     let currentPngBytes = null;
     let originalFileSize = 0;
 
-    // Initialize all WASM modules
-    async function initModules() {
-      const status = [];
+    // Create worker for WASM operations
+    const worker = new Worker('./benchmark-worker.js', { type: 'module' });
 
-      try {
-        await initPng('./web-wasm-png/pngs.wasm');
-        status.push('PNG (denosaurs)');
-      } catch (e) { console.error('PNG init failed:', e); }
+    // Handle worker messages
+    worker.onmessage = (e) => {
+      const { type, modules, message, category, data } = e.data;
 
-      try {
-        await initSquoosh('./web-wasm-png-squoosh/squoosh_png_bg.wasm', './web-wasm-png-squoosh/squoosh_oxipng_bg.wasm');
-        status.push('PNG (Squoosh)');
-      } catch (e) { console.error('Squoosh init failed:', e); }
-
-      try {
-        await initWebp('./web-wasm-webp/webp_enc.wasm', './web-wasm-webp/webp_dec.wasm');
-        status.push('WebP');
-      } catch (e) { console.error('WebP init failed:', e); }
-
-      try {
-        const { png } = await import('./node_modules/icodec/lib/index.js');
-        await png.loadEncoder();
-        icodecPng = png;
-        status.push('icodec');
-      } catch (e) { console.error('icodec init failed:', e); }
-
-      if (status.length > 0) {
-        initStatus.textContent = 'Ready: ' + status.join(', ');
-        initStatus.style.color = '#28a745';
-        modulesReady = true;
-      } else {
-        initStatus.textContent = 'Failed to load any modules';
-        initStatus.style.color = '#dc3545';
+      if (type === 'ready') {
+        if (modules.length > 0) {
+          initStatus.textContent = 'Ready: ' + modules.join(', ');
+          initStatus.style.color = '#28a745';
+          modulesReady = true;
+          if (currentImageData) runBtn.disabled = false;
+        } else {
+          initStatus.textContent = 'Failed to load any modules';
+          initStatus.style.color = '#dc3545';
+        }
+      } else if (type === 'progress') {
+        progress.textContent = message;
+      } else if (type === 'result') {
+        // Add result row immediately
+        const table = category === 'decode' ? decodeTable : encodeTable;
+        addRow(table, data.name, data, category === 'encode');
+      } else if (type === 'done') {
+        // Highlight best results
+        highlightBest(decodeTable, 1);
+        highlightBest(encodeTable, 1);
+        progress.textContent = 'Done!';
+        progress.style.background = '#d4edda';
+        runBtn.disabled = false;
       }
-    }
+    };
 
-    initModules();
+    worker.onerror = (e) => {
+      console.error('Worker error:', e);
+      initStatus.textContent = 'Worker error: ' + e.message;
+      initStatus.style.color = '#dc3545';
+    };
+
+    // Initialize worker
+    worker.postMessage({ type: 'init' });
 
     // File upload handling
     uploadArea.addEventListener('click', () => fileInput.click());
@@ -229,27 +227,6 @@
       return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
     }
 
-    // Benchmark runner
-    function benchmark(fn, iterations) {
-      // Warmup
-      try { fn(); } catch (e) { return { error: e.message }; }
-
-      const times = [];
-      let result;
-      for (let i = 0; i < iterations; i++) {
-        const start = performance.now();
-        result = fn();
-        times.push(performance.now() - start);
-      }
-
-      return {
-        avg: times.reduce((a, b) => a + b, 0) / times.length,
-        min: Math.min(...times),
-        max: Math.max(...times),
-        result
-      };
-    }
-
     function addRow(table, name, data, isEncode = false) {
       const tr = document.createElement('tr');
       if (data.error) {
@@ -262,7 +239,6 @@
         tr.innerHTML = html;
       }
       table.appendChild(tr);
-      return data.avg || Infinity;
     }
 
     function highlightBest(table, colIndex) {
@@ -284,140 +260,35 @@
       if (bestRow) bestRow.cells[colIndex].classList.add('best');
     }
 
-    runBtn.addEventListener('click', async () => {
+    // Run benchmark button
+    runBtn.addEventListener('click', () => {
       if (!currentImageData) return;
 
       runBtn.disabled = true;
       progress.style.display = 'block';
+      progress.style.background = '#fff3cd';
+      progress.textContent = 'Starting benchmark...';
       resultsContainer.style.display = 'block';
       decodeTable.innerHTML = '';
       encodeTable.innerHTML = '';
 
       const iterations = parseInt(iterationsSelect.value);
-      const { width, height } = currentImageData;
-      const pixels = currentImageData.data;
-      const imgDataObj = { data: currentImageData.data, width, height };
-
-      // For icodec, need depth property
-      const imgDataWithDepth = { data: new Uint8ClampedArray(pixels), width, height, depth: 8 };
-
-      // Check if input is PNG for decode tests
       const isPng = currentPngBytes[0] === 0x89 && currentPngBytes[1] === 0x50;
 
-      // === DECODE BENCHMARKS ===
-      progress.textContent = 'Running decode benchmarks...';
-      await new Promise(r => setTimeout(r, 50));
-
-      if (isPng) {
-        // PNG (denosaurs) decode
-        progress.textContent = 'Decoding: PNG (denosaurs)...';
-        await new Promise(r => setTimeout(r, 10));
-        addRow(decodeTable, 'PNG (denosaurs)', benchmark(() => decodePng(currentPngBytes), iterations));
-
-        // Squoosh decode
-        progress.textContent = 'Decoding: PNG (Squoosh)...';
-        await new Promise(r => setTimeout(r, 10));
-        addRow(decodeTable, 'PNG (Squoosh)', benchmark(() => squooshDecode(currentPngBytes), iterations));
-
-        // icodec decode
-        if (icodecPng) {
-          progress.textContent = 'Decoding: icodec...';
-          await new Promise(r => setTimeout(r, 10));
-          addRow(decodeTable, 'icodec PNG', benchmark(() => icodecPng.decode(currentPngBytes), iterations));
+      // Send data to worker
+      worker.postMessage({
+        type: 'benchmark',
+        data: {
+          imageData: {
+            data: currentImageData.data,
+            width: currentImageData.width,
+            height: currentImageData.height
+          },
+          pngBytes: currentPngBytes,
+          iterations,
+          isPng
         }
-      } else {
-        decodeTable.innerHTML = '<tr><td colspan="4">Upload a PNG to test decode performance</td></tr>';
-      }
-
-      // WebP decode (encode first, then decode)
-      progress.textContent = 'Encoding WebP for decode test...';
-      await new Promise(r => setTimeout(r, 10));
-      const webpBytes = webpEncode(imgDataObj, { quality: 80 });
-      progress.textContent = 'Decoding: WebP...';
-      await new Promise(r => setTimeout(r, 10));
-      addRow(decodeTable, 'WebP', benchmark(() => webpDecode(webpBytes), iterations));
-
-      highlightBest(decodeTable, 1);
-
-      // === ENCODE BENCHMARKS ===
-      progress.textContent = 'Running encode benchmarks...';
-      await new Promise(r => setTimeout(r, 50));
-
-      // PNG (denosaurs)
-      progress.textContent = 'Encoding: PNG (denosaurs)...';
-      await new Promise(r => setTimeout(r, 10));
-      let result = benchmark(() => encodePng(pixels, width, height, { color: ColorType.RGBA }), iterations);
-      result.size = result.result?.length;
-      addRow(encodeTable, 'PNG (denosaurs)', result, true);
-
-      // Squoosh PNG
-      progress.textContent = 'Encoding: PNG (Squoosh)...';
-      await new Promise(r => setTimeout(r, 10));
-      result = benchmark(() => squooshEncode(imgDataObj), iterations);
-      result.size = result.result?.length;
-      addRow(encodeTable, 'PNG (Squoosh)', result, true);
-
-      // OxiPNG level 0
-      progress.textContent = 'Encoding: OxiPNG L0...';
-      await new Promise(r => setTimeout(r, 10));
-      result = benchmark(() => encodeOptimized(imgDataObj, null, null, 0), iterations);
-      result.size = result.result?.length;
-      addRow(encodeTable, 'OxiPNG L0 (Squoosh)', result, true);
-
-      // OxiPNG level 1
-      progress.textContent = 'Encoding: OxiPNG L1...';
-      await new Promise(r => setTimeout(r, 10));
-      result = benchmark(() => encodeOptimized(imgDataObj, null, null, 1), iterations);
-      result.size = result.result?.length;
-      addRow(encodeTable, 'OxiPNG L1 (Squoosh)', result, true);
-
-      // OxiPNG level 2
-      progress.textContent = 'Encoding: OxiPNG L2...';
-      await new Promise(r => setTimeout(r, 10));
-      result = benchmark(() => encodeOptimized(imgDataObj, null, null, 2), iterations);
-      result.size = result.result?.length;
-      addRow(encodeTable, 'OxiPNG L2 (Squoosh)', result, true);
-
-      // icodec PNG
-      if (icodecPng) {
-        progress.textContent = 'Encoding: icodec L0...';
-        await new Promise(r => setTimeout(r, 10));
-        result = benchmark(() => icodecPng.encode(imgDataWithDepth, { quantize: false, level: 0 }), iterations);
-        result.size = result.result?.length;
-        addRow(encodeTable, 'icodec PNG L0', result, true);
-
-        progress.textContent = 'Encoding: icodec L1...';
-        await new Promise(r => setTimeout(r, 10));
-        result = benchmark(() => icodecPng.encode(imgDataWithDepth, { quantize: false, level: 1 }), iterations);
-        result.size = result.result?.length;
-        addRow(encodeTable, 'icodec PNG L1', result, true);
-
-        progress.textContent = 'Encoding: icodec L2...';
-        await new Promise(r => setTimeout(r, 10));
-        result = benchmark(() => icodecPng.encode(imgDataWithDepth, { quantize: false, level: 2 }), iterations);
-        result.size = result.result?.length;
-        addRow(encodeTable, 'icodec PNG L2', result, true);
-      }
-
-      // WebP lossy
-      progress.textContent = 'Encoding: WebP q80...';
-      await new Promise(r => setTimeout(r, 10));
-      result = benchmark(() => webpEncode(imgDataObj, { quality: 80 }), iterations);
-      result.size = result.result?.length;
-      addRow(encodeTable, 'WebP (q80)', result, true);
-
-      // WebP lossless
-      progress.textContent = 'Encoding: WebP lossless...';
-      await new Promise(r => setTimeout(r, 10));
-      result = benchmark(() => webpEncode(imgDataObj, { lossless: 1 }), iterations);
-      result.size = result.result?.length;
-      addRow(encodeTable, 'WebP (lossless)', result, true);
-
-      highlightBest(encodeTable, 1);
-
-      progress.textContent = 'Done!';
-      progress.style.background = '#d4edda';
-      runBtn.disabled = false;
+      });
     });
   </script>
 </body>
